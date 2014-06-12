@@ -240,7 +240,8 @@ public class ServletTest extends TestCase {
             assertSame(req, servletReqProvider.get());
             assertSame(req, reqProvider.get());
             if (previousReq[0] != null) {
-              assertEquals(req, previousReq[0]);
+              ServletRequest wrappedReq = ((HttpServletRequestWrapper) req).getRequest();
+              assertEquals(wrappedReq, previousReq[0]);
             }
 
             assertSame(resp, servletRespProvider.get());

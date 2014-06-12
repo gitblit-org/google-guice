@@ -76,10 +76,16 @@ class FilterChainInvocation implements FilterChain {
     try {
       Filter filter = findNextFilter(request);
       if (filter != null) {
+        // wrap the servlet request with filter-specific request info
+        FilterDefinition filterDefinition = filterDefinitions[index];
+        HttpServletRequest filterRequest = filterDefinition.wrapRequest(request);
+        // replace the filter context
+        GuiceFilter.localContext.set(new GuiceFilter.Context(originalRequest, filterRequest, response));
+
         // call to the filter, which can either consume the request or
         // recurse back into this method. (in which case we will go to find the next filter,
         // or dispatch to the servlet if no more filters are left)
-        filter.doFilter(servletRequest, servletResponse, this);
+        filter.doFilter(filterRequest, servletResponse, this);
       } else {
         //we've reached the end of the filterchain, let's try to dispatch to a servlet
         final boolean serviced = servletPipeline.service(servletRequest, servletResponse);
