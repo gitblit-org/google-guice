@@ -23,6 +23,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.ConfigurationException;
+import com.google.inject.Key;
 import com.google.inject.TypeLiteral;
 import com.google.inject.util.Types;
 
@@ -64,6 +65,25 @@ public class MoreTypes {
           .build();
 
   /**
+   * Returns a key that doesn't hold any references to parent classes.
+   * This is necessary for anonymous keys, so ensure we don't hold a ref
+   * to the containing module (or class) forever.
+   */
+  public static <T> Key<T> canonicalizeKey(Key<T> key) {
+    // If we know this isn't a subclass, return as-is.
+    // Otherwise, recreate the key to avoid the subclass 
+    if (key.getClass() == Key.class) {
+      return key;
+    } else if (key.getAnnotation() != null) {
+      return Key.get(key.getTypeLiteral(), key.getAnnotation());
+    } else if (key.getAnnotationType() != null) {
+      return Key.get(key.getTypeLiteral(), key.getAnnotationType());
+    } else {
+      return Key.get(key.getTypeLiteral());
+    }
+  }
+
+  /**
    * Returns an type that's appropriate for use in a key.
    *
    * <p>If the raw type of {@code typeLiteral} is a {@code javax.inject.Provider}, this returns a
@@ -93,9 +113,20 @@ public class MoreTypes {
 
     @SuppressWarnings("unchecked")
     TypeLiteral<T> wrappedPrimitives = (TypeLiteral<T>) PRIMITIVE_TO_WRAPPER.get(typeLiteral);
-    return wrappedPrimitives != null
-        ? wrappedPrimitives
-        : typeLiteral;
+    if (wrappedPrimitives != null) {
+      return wrappedPrimitives;
+    }
+
+    // If we know this isn't a subclass, return as-is.
+    if (typeLiteral.getClass() == TypeLiteral.class) {
+      return typeLiteral;
+    }
+
+    // recreate the TypeLiteral to avoid anonymous TypeLiterals from holding refs to their
+    // surrounding classes.
+    @SuppressWarnings("unchecked")
+    TypeLiteral<T> recreated = (TypeLiteral<T>) TypeLiteral.get(typeLiteral.getType());
+    return recreated;
   }
 
   /**
@@ -246,9 +277,9 @@ public class MoreTypes {
   }
 
   /**
-   * Returns the generic supertype for {@code supertype}. For example, given a class {@code
-   * IntegerSet}, the result for when supertype is {@code Set.class} is {@code Set<Integer>} and the
-   * result when the supertype is {@code Collection.class} is {@code Collection<Integer>}.
+   * Returns the generic supertype for {@code type}. For example, given a class {@code IntegerSet},
+   * the result for when supertype is {@code Set.class} is {@code Set<Integer>} and the result
+   * when the supertype is {@code Collection.class} is {@code Collection<Integer>}.
    */
   public static Type getGenericSupertype(Type type, Class<?> rawType, Class<?> toResolve) {
     if (toResolve == rawType) {
@@ -329,13 +360,7 @@ public class MoreTypes {
 
     public ParameterizedTypeImpl(Type ownerType, Type rawType, Type... typeArguments) {
       // require an owner type if the raw type needs it
-      if (rawType instanceof Class<?>) {
-        Class rawTypeAsClass = (Class) rawType;
-        checkArgument(ownerType != null || rawTypeAsClass.getEnclosingClass() == null,
-            "No owner type for enclosed %s", rawType);
-        checkArgument(ownerType == null || rawTypeAsClass.getEnclosingClass() != null,
-            "Owner type for unenclosed %s", rawType);
-      }
+      ensureOwnerType(ownerType, rawType);
 
       this.ownerType = ownerType == null ? null : canonicalize(ownerType);
       this.rawType = canonicalize(rawType);
@@ -401,6 +426,16 @@ public class MoreTypes {
         stringBuilder.append(", ").append(typeToString(typeArguments[i]));
       }
       return stringBuilder.append(">").toString();
+    }
+
+    private static void ensureOwnerType(Type ownerType, Type rawType) {
+      if (rawType instanceof Class<?>) {
+        Class rawTypeAsClass = (Class) rawType;
+        checkArgument(ownerType != null || rawTypeAsClass.getEnclosingClass() == null,
+            "No owner type for enclosed %s", rawType);
+        checkArgument(ownerType == null || rawTypeAsClass.getEnclosingClass() != null,
+            "Owner type for unenclosed %s", rawType);
+      }
     }
 
     private static final long serialVersionUID = 0;

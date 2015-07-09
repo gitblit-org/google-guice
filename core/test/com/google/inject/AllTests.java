@@ -18,7 +18,6 @@ package com.google.inject;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.internal.MoreTypesTest;
-import com.google.inject.internal.RehashableKeysTest;
 import com.google.inject.internal.UniqueAnnotationsTest;
 import com.google.inject.internal.WeakKeySetTest;
 import com.google.inject.internal.util.LineNumbersTest;
@@ -32,6 +31,7 @@ import com.google.inject.spi.ElementsTest;
 import com.google.inject.spi.HasDependenciesTest;
 import com.google.inject.spi.InjectionPointTest;
 import com.google.inject.spi.InjectorSpiTest;
+import com.google.inject.spi.ModuleAnnotatedMethodScannerTest;
 import com.google.inject.spi.ModuleRewriterTest;
 import com.google.inject.spi.ModuleSourceTest;
 import com.google.inject.spi.ProviderMethodsTest;
@@ -87,6 +87,7 @@ public class AllTests {
     suite.addTestSuite(MembersInjectorTest.class);
     suite.addTestSuite(ModulesTest.class);
     suite.addTestSuite(ModuleTest.class);
+    suite.addTestSuite(ModuleAnnotatedMethodScannerTest.class);
     suite.addTestSuite(NullableInjectionPointTest.class);
     suite.addTestSuite(OptionalBindingTest.class);
     suite.addTestSuite(OverrideModuleTest.class);
@@ -97,7 +98,6 @@ public class AllTests {
     suite.addTestSuite(ProvisionListenerTest.class);
     // ProxyFactoryTest is AOP-only
     suite.addTestSuite(ReflectionTest.class);
-    suite.addTestSuite(RehashableKeysTest.class);
     suite.addTestSuite(RequestInjectionTest.class);
     suite.addTestSuite(RequireAtInjectOnConstructorsTest.class);
     suite.addTestSuite(ScopesTest.class);

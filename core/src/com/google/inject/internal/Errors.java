@@ -19,11 +19,15 @@ package com.google.inject.internal;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
+import com.google.common.collect.Sets;
 import com.google.inject.ConfigurationException;
 import com.google.inject.CreationException;
+import com.google.inject.Guice;
 import com.google.inject.Key;
 import com.google.inject.MembersInjector;
 import com.google.inject.Provider;
+import com.google.inject.Provides;
 import com.google.inject.ProvisionException;
 import com.google.inject.Scope;
 import com.google.inject.TypeLiteral;
@@ -49,11 +53,12 @@ import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.Formatter;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * A collection of error messages. If this type is passed as a method parameter, the method is
@@ -71,6 +76,11 @@ import java.util.Set;
  * @author jessewilson@google.com (Jesse Wilson)
  */
 public final class Errors implements Serializable {
+
+  private static final Logger logger = Logger.getLogger(Guice.class.getName());
+
+  private static final Set<Dependency<?>> warnedDependencies =
+      Sets.newSetFromMap(new ConcurrentHashMap<Dependency<?>, Boolean>());
 
 
   /**
@@ -139,6 +149,13 @@ public final class Errors implements Serializable {
 
   public Errors jitDisabled(Key key) {
     return addMessage("Explicit bindings are required and %s is not explicitly bound.", key);
+  }
+
+  public Errors jitDisabledInParent(Key<?> key) {
+    return addMessage(
+        "Explicit bindings are required and %s would be bound in a parent injector.%n"
+        + "Please add an explicit binding for it, either in the child or the parent.",
+        key);
   }
 
   public Errors atInjectRequired(Class clazz) {
@@ -544,14 +561,12 @@ public final class Errors implements Serializable {
       return ImmutableList.of();
     }
 
-    List<Message> result = Lists.newArrayList(root.errors);
-    Collections.sort(result, new Comparator<Message>() {
+    return new Ordering<Message>() {
+      @Override
       public int compare(Message a, Message b) {
         return a.getSource().compareTo(b.getSource());
       }
-    });
-
-    return result;
+    }.sortedCopy(root.errors);
   }
 
   /** Returns the formatted message for an exception with the specified messages. */
@@ -596,6 +611,33 @@ public final class Errors implements Serializable {
       throws ErrorsException {
     if (value != null || dependency.isNullable() ) {
       return value;
+    }
+
+    // Hack to allow null parameters to @Provides methods, for backwards compatibility.
+    if (dependency.getInjectionPoint().getMember() instanceof Method) {
+      Method annotated = (Method) dependency.getInjectionPoint().getMember();
+      if (annotated.isAnnotationPresent(Provides.class)) {
+        switch (InternalFlags.getNullableProvidesOption()) {
+          case ERROR:
+            break; // break out & let the below exception happen
+          case IGNORE:
+            return value; // user doesn't care about injecting nulls to non-@Nullables.
+          case WARN:
+            // Warn only once, otherwise we spam logs too much.
+            if (!warnedDependencies.add(dependency)) {
+              return value;
+            }
+            logger.log(Level.WARNING,
+                "Guice injected null into parameter {0} of {1} (a {2}), please mark it @Nullable."
+                    + " Use -Dguice_check_nullable_provides_params=ERROR to turn this into an"
+                    + " error.",
+                new Object[] {
+                    dependency.getParameterIndex(),
+                    convert(dependency.getInjectionPoint().getMember()),
+                    convert(dependency.getKey())});
+            return null; // log & exit.
+        }
+      }
     }
 
     int parameterIndex = dependency.getParameterIndex();
@@ -769,6 +811,9 @@ public final class Errors implements Serializable {
     } else if (source instanceof Key) {
       Key<?> key = (Key<?>) source;
       formatter.format("  while locating %s%n", convert(key, elementSource));
+
+    } else if (source instanceof Thread) {
+      formatter.format("  in thread %s%n", source);
 
     } else {
       formatter.format("  at %s%s%n", source, modules);

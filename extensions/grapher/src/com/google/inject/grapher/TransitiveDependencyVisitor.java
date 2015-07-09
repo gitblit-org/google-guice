@@ -35,15 +35,15 @@ import java.util.Collection;
 import java.util.Set;
 
 /**
- * {@link BindingTargetVisitor} that returns a {@link Collection} of the
- * {@link Key}s of each {@link Binding}'s dependencies. Used by
- * {@link InjectorGrapher} to walk the dependency graph from a starting set of
- * {@link Binding}s.
+ * {@link com.google.inject.spi.BindingTargetVisitor} that returns a
+ * {@link Collection} of the {@link Key}s of each {@link Binding}'s
+ * dependencies. Used by {@link InjectorGrapher} to walk the dependency graph
+ * from a starting set of {@link Binding}s.
  *
  * @author phopkins@gmail.com (Pete Hopkins)
  */
 public class TransitiveDependencyVisitor
-extends DefaultBindingTargetVisitor<Object, Collection<Key<?>>> {
+    extends DefaultBindingTargetVisitor<Object, Collection<Key<?>>> {
 
   private Collection<Key<?>> visitHasDependencies(HasDependencies hasDependencies) {
     Set<Key<?>> dependencies = Sets.newHashSet();
@@ -83,6 +83,7 @@ extends DefaultBindingTargetVisitor<Object, Collection<Key<?>>> {
     return ImmutableSet.<Key<?>>of(binding.getProviderKey());
   }
 
+  /** @since 4.0 */
   @Override public Collection<Key<?>> visitOther(Binding<?> binding) {
     return ImmutableSet.of();
   }

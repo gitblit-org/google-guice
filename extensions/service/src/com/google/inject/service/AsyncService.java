@@ -30,14 +30,11 @@ import java.util.concurrent.FutureTask;
  * @author dhanji@gmail.com (Dhanji R. Prasanna)
  */
 public abstract class AsyncService implements Service {
-  private final ExecutorService executor;
-
-  /**
-   * A runnable that does nothing.
-   */
-  private static final Runnable NOOP = new Runnable() {
-    public void run() { }
+  private static final Runnable DO_NOTHING = new Runnable() {
+    @Override public void run() {}
   };
+
+  private final ExecutorService executor;
 
   private volatile State state;
 
@@ -51,7 +48,7 @@ public abstract class AsyncService implements Service {
 
     // Starts are idempotent.
     if (state == State.STARTED) {
-      return new FutureTask<State>(NOOP, State.STARTED);
+      return new FutureTask<State>(DO_NOTHING, State.STARTED);
     }
 
     return executor.submit(new Callable<State>() {
@@ -76,7 +73,7 @@ public abstract class AsyncService implements Service {
 
     // Likewise, stops are idempotent.
     if (state == State.STOPPED) {
-      return new FutureTask<State>(NOOP, State.STOPPED);
+      return new FutureTask<State>(DO_NOTHING, State.STOPPED);
     }
 
     return executor.submit(new Callable<State>() {

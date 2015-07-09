@@ -45,6 +45,8 @@ import java.util.logging.Logger;
  * @author sameb@google.com (Sam Berlin)
  */
 final class CheckedProviderMethodsModule implements Module {
+  private static final Key<Logger> LOGGER_KEY = Key.get(Logger.class);
+
   private final Object delegate;
   private final TypeLiteral<?> typeLiteral;
 
@@ -77,7 +79,7 @@ final class CheckedProviderMethodsModule implements Module {
       for (Method method : c.getDeclaredMethods()) {
         CheckedProvides checkedProvides = method.getAnnotation(CheckedProvides.class);
         if(checkedProvides != null) {
-          result.add(createProviderMethod(binder, method, checkedProvides.value()));
+          result.add(createProviderMethod(binder, method, checkedProvides));
         }
       }
     }
@@ -85,7 +87,9 @@ final class CheckedProviderMethodsModule implements Module {
   }
 
   <T> CheckedProviderMethod<T> createProviderMethod(Binder binder, final Method method,
-      Class<? extends CheckedProvider> throwingProvider) {
+      CheckedProvides checkedProvides) {
+    @SuppressWarnings("rawtypes")
+    Class<? extends CheckedProvider> throwingProvider = checkedProvides.value();
     binder = binder.withSource(method);
     Errors errors = new Errors(method);
 
@@ -96,7 +100,7 @@ final class CheckedProviderMethodsModule implements Module {
     Annotation[][] parameterAnnotations = method.getParameterAnnotations();
     for (int i = 0; i < parameterTypes.size(); i++) {
       Key<?> key = getKey(errors, parameterTypes.get(i), method, parameterAnnotations[i]);
-      if(key.equals(Key.get(Logger.class))) {
+      if (key.equals(LOGGER_KEY)) {
         // If it was a Logger, change the key to be unique & bind it to a
         // provider that provides a logger with a proper name.
         // This solves issue 482 (returning a new anonymous logger on every call exhausts memory)
@@ -121,7 +125,8 @@ final class CheckedProviderMethodsModule implements Module {
     }
 
     return new CheckedProviderMethod<T>(key, method, delegate, ImmutableSet.copyOf(dependencies),
-        parameterProviders, scopeAnnotation, throwingProvider, exceptionTypes);
+        parameterProviders, scopeAnnotation, throwingProvider, exceptionTypes, 
+        checkedProvides.scopeExceptions()); 
   }
 
   <T> Key<T> getKey(Errors errors, TypeLiteral<T> type, Member member, Annotation[] annotations) {

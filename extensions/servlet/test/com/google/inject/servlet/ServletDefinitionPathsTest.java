@@ -23,7 +23,6 @@ import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.verify;
 
-import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.inject.Binding;
 import com.google.inject.Injector;
@@ -99,8 +98,7 @@ public class ServletDefinitionPathsTest extends TestCase {
     ServletDefinition servletDefinition = new ServletDefinition(mapping, Key.get(HttpServlet.class),
         UriPatternType.get(UriPatternType.SERVLET, mapping), new HashMap<String, String>(), null);
 
-    servletDefinition.init(null, injector,
-        Sets.newSetFromMap(Maps.<HttpServlet, Boolean>newIdentityHashMap()));
+    servletDefinition.init(null, injector, Sets.<HttpServlet>newIdentityHashSet());
     servletDefinition.doService(request, response);
 
     assertTrue("Servlet did not run!", run[0]);
@@ -135,6 +133,10 @@ public class ServletDefinitionPathsTest extends TestCase {
         "/.../h.thing");
     pathInfoWithServletStyleMatching("/path/my/h.thing", "/path", "*.thing", null, "/my/h.thing");
 
+    // Encoded URLs
+    pathInfoWithServletStyleMatching("/path/index%2B.html", "/path", "/*", "/index+.html", "");
+    pathInfoWithServletStyleMatching("/path/a%20file%20with%20spaces%20in%20name.html", "/path", "/*", "/a file with spaces in name.html", "");
+    pathInfoWithServletStyleMatching("/path/Tam%C3%A1s%20nem%20m%C3%A1s.html", "/path", "/*", "/Tamás nem más.html", "");
   }
 
   private void pathInfoWithServletStyleMatching(final String requestUri, final String contextPath,
@@ -196,8 +198,7 @@ public class ServletDefinitionPathsTest extends TestCase {
     ServletDefinition servletDefinition = new ServletDefinition(mapping, Key.get(HttpServlet.class),
         UriPatternType.get(UriPatternType.SERVLET, mapping), new HashMap<String, String>(), null);
 
-    servletDefinition.init(null, injector,
-        Sets.newSetFromMap(Maps.<HttpServlet, Boolean>newIdentityHashMap()));
+    servletDefinition.init(null, injector, Sets.<HttpServlet>newIdentityHashSet());
     servletDefinition.doService(request, response);
 
     assertTrue("Servlet did not run!", run[0]);
@@ -231,6 +232,11 @@ public class ServletDefinitionPathsTest extends TestCase {
     // path
     pathInfoWithRegexMatching("/path/test.com/com.test.MyServletModule", "", "/path/[^/]+/(.*)",
         "com.test.MyServletModule", "/path/test.com/com.test.MyServletModule");
+
+    // Encoded URLs
+    pathInfoWithRegexMatching("/path/index%2B.html", "/path", "/(.)*", "/index+.html", "");
+    pathInfoWithRegexMatching("/path/a%20file%20with%20spaces%20in%20name.html", "/path", "/(.)*", "/a file with spaces in name.html", "");
+    pathInfoWithRegexMatching("/path/Tam%C3%A1s%20nem%20m%C3%A1s.html", "/path", "/(.)*", "/Tamás nem más.html", "");
   }
 
   public final void pathInfoWithRegexMatching(final String requestUri, final String contextPath,
@@ -292,8 +298,7 @@ public class ServletDefinitionPathsTest extends TestCase {
     ServletDefinition servletDefinition = new ServletDefinition(mapping, Key.get(HttpServlet.class),
         UriPatternType.get(UriPatternType.REGEX, mapping), new HashMap<String, String>(), null);
 
-    servletDefinition.init(null, injector,
-        Sets.newSetFromMap(Maps.<HttpServlet, Boolean>newIdentityHashMap()));
+    servletDefinition.init(null, injector, Sets.<HttpServlet>newIdentityHashSet());
     servletDefinition.doService(request, response);
 
     assertTrue("Servlet did not run!", run[0]);

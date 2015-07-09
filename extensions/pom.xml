@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.google.inject</groupId>
     <artifactId>guice-parent</artifactId>
-    <version>4.0-beta4</version>
+    <version>4.0</version>
   </parent>
 
   <packaging>pom</packaging>
@@ -18,6 +18,8 @@
 
   <modules>
     <module>assistedinject</module>
+    <!-- TODO(cgruber): Comment out dagger-adapter module if guice releases before dagger 2.x -->
+    <module>dagger-adapter</module>
     <module>grapher</module>
     <module>jmx</module>
     <module>jndi</module>
@@ -62,7 +64,6 @@
     <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava-testlib</artifactId>
-      <version>16.0.1</version>
       <scope>test</scope>
     </dependency>
     <!--
@@ -70,21 +71,13 @@
      | in an execution that doesn't include package.
     -->
     <dependency>
-      <groupId>cglib</groupId>
-      <artifactId>cglib</artifactId>
-      <version>3.1</version>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <groupId>asm</groupId>
-          <artifactId>asm</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
       <groupId>org.ow2.asm</groupId>
       <artifactId>asm</artifactId>
-      <version>5.0.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>cglib</groupId>
+      <artifactId>cglib</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -98,7 +91,7 @@
         <artifactId>maven-remote-resources-plugin</artifactId>
       </plugin>
       <!--
-       | Enable Java5 conformance checks
+       | Enable Java6 conformance checks
       -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

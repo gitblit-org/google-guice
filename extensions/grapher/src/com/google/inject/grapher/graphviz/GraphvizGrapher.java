@@ -38,12 +38,13 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 /**
- * {@link InjectorGrapher} implementation that writes out a Graphviz DOT file of the graph.
- * Dependencies are bound in {@link GraphvizModule}.
+ * {@link com.google.inject.grapher.InjectorGrapher} implementation that writes out a Graphviz DOT
+ * file of the graph. Dependencies are bound in {@link GraphvizModule}.
  * <p>
  * Specify the {@link PrintWriter} to output to with {@link #setOut(PrintWriter)}.
  *
  * @author phopkins@gmail.com (Pete Hopkins)
+ * @since 4.0
  */
 public class GraphvizGrapher extends AbstractInjectorGrapher {
   private final Map<NodeId, GraphvizNode> nodes = Maps.newHashMap();

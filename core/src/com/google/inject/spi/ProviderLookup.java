@@ -18,14 +18,11 @@ package com.google.inject.spi;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.inject.internal.RehashableKeys.Keys.needsRehashing;
-import static com.google.inject.internal.RehashableKeys.Keys.rehash;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Binder;
 import com.google.inject.Key;
 import com.google.inject.Provider;
-import com.google.inject.internal.RehashableKeys;
 import com.google.inject.util.Types;
 
 import java.util.Set;
@@ -42,13 +39,17 @@ import java.util.Set;
  */
 public final class ProviderLookup<T> implements Element {
   private final Object source;
-  private Key<T> key;  // effectively final, as it will not change once it escapes into user code
+  private final Dependency<T> dependency;
   private Provider<T> delegate;
-  private boolean rehashed = false;
 
   public ProviderLookup(Object source, Key<T> key) {
+    this(source, Dependency.get(checkNotNull(key, "key")));
+  }
+
+  /** @since 4.0 */
+  public ProviderLookup(Object source, Dependency<T> dependency) {
     this.source = checkNotNull(source, "source");
-    this.key = checkNotNull(key, "key");
+    this.dependency = checkNotNull(dependency, "dependency");
   }
 
   public Object getSource() {
@@ -56,7 +57,12 @@ public final class ProviderLookup<T> implements Element {
   }
 
   public Key<T> getKey() {
-    return key;
+    return dependency.getKey();
+  }
+
+  /** @since 4.0 */
+  public Dependency<T> getDependency() {
+    return dependency;
   }
 
   public <T> T acceptVisitor(ElementVisitor<T> visitor) {
@@ -74,7 +80,7 @@ public final class ProviderLookup<T> implements Element {
   }
 
   public void applyTo(Binder binder) {
-    initializeDelegate(binder.withSource(getSource()).getProvider(key));
+    initializeDelegate(binder.withSource(getSource()).getProvider(dependency));
   }
 
   /**
@@ -97,33 +103,16 @@ public final class ProviderLookup<T> implements Element {
             "This Provider cannot be used until the Injector has been created.");
         return delegate.get();
       }
-      
+
       public Set<Dependency<?>> getDependencies() {
-        // If someone inside a Module is casting the Provider to HasDependencies
-        // in order to find its dependencies, we give them nothing (because we can't
-        // guarantee that the key is finalized yet).  However, if someone acts on
-        // a ProviderLookup or ProviderInstanceBinding, it will properly find dependencies.
-        checkState(rehashed, "Dependencies can not be retrieved until the Injector has been "
-            + "created (or Elements.getElements finishes)");
         // We depend on Provider<T>, not T directly.  This is an important distinction
         // for dependency analysis tools that short-circuit on providers.
-        Key<?> providerKey = key.ofType(Types.providerOf(key.getTypeLiteral().getType()));
+        Key<?> providerKey = getKey().ofType(Types.providerOf(getKey().getTypeLiteral().getType()));
         return ImmutableSet.<Dependency<?>>of(Dependency.get(providerKey));
       }
 
       @Override public String toString() {
-        return "Provider<" + key.getTypeLiteral() + ">";
-      }
-    };
-  }
-
-  RehashableKeys getKeyRehasher() {
-    return new RehashableKeys() {
-      @Override public void rehashKeys() {
-        rehashed = true;
-        if (needsRehashing(key)) {
-          key = rehash(key);
-        }
+        return "Provider<" + getKey().getTypeLiteral() + ">";
       }
     };
   }

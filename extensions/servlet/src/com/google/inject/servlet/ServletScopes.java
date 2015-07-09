@@ -44,12 +44,6 @@ public class ServletScopes {
 
   private ServletScopes() {}
 
-  /** Keys bound in request-scope which are handled directly by GuiceFilter. */
-  private static final ImmutableSet<Key<?>> REQUEST_CONTEXT_KEYS = ImmutableSet.of(
-      Key.get(HttpServletRequest.class),
-      Key.get(HttpServletResponse.class),
-      new Key<Map<String, String[]>>(RequestParameters.class) {});
-
   /**
    * A threadlocal scope map for non-http request scopes. The {@link #REQUEST}
    * scope falls back to this scope map if no http request is available, and
@@ -67,6 +61,13 @@ public class ServletScopes {
   public static final Scope REQUEST = new Scope() {
     public <T> Provider<T> scope(final Key<T> key, final Provider<T> creator) {
       return new Provider<T>() {
+
+        /** Keys bound in request-scope which are handled directly by GuiceFilter. */
+        private final ImmutableSet<Key<?>> REQUEST_CONTEXT_KEYS = ImmutableSet.of(
+                Key.get(HttpServletRequest.class),
+                Key.get(HttpServletResponse.class),
+                new Key<Map<String, String[]>>(RequestParameters.class) {});
+
         public T get() {
           // Check if the alternate request scope should be used, if no HTTP
           // request is in progress.
@@ -255,6 +256,7 @@ public class ServletScopes {
    *     context available to it.
    * @throws OutOfScopeException if this method is called from a non-request
    *     thread, or if the request has completed.
+   * @since 4.0
    */
   public static <T> Callable<T> transferRequest(Callable<T> callable) {
     return (GuiceFilter.localContext.get() != null)
@@ -292,6 +294,8 @@ public class ServletScopes {
    * belongs to an injector (i. e. it was retrieved via
    * {@link Injector#getBinding Injector.getBinding()}), then this method will
    * also return true if the target binding is request-scoped.
+   *
+   * @since 4.0
    */
   public static boolean isRequestScoped(Binding<?> binding) {
     return Scopes.isScoped(binding, ServletScopes.REQUEST, RequestScoped.class);
