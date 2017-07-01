@@ -9,7 +9,8 @@
     <version>4.0</version>
   </parent>
 
-  <artifactId>guice-servlet</artifactId>
+  <artifactId>guice-servlet</artifactId>  
+  <version>4.0-gb2</version>
 
   <name>Google Guice - Extensions - Servlet</name>
 
