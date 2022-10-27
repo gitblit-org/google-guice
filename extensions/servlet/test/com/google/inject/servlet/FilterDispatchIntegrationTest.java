@@ -19,8 +19,10 @@ package com.google.inject.servlet;
 import static com.google.inject.servlet.ManagedServletPipeline.REQUEST_DISPATCHER_REQUEST;
 import static com.google.inject.servlet.ServletTestUtils.newFakeHttpServletRequest;
 import static com.google.inject.servlet.ServletTestUtils.newNoOpFilterChain;
+import static org.easymock.EasyMock.anyObject;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.expectLastCall;
+import static org.easymock.EasyMock.isNull;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
@@ -197,7 +199,7 @@ public class FilterDispatchIntegrationTest extends TestCase {
 
     // dispatch request
     FilterChain filterChain = control.createMock(FilterChain.class);
-    filterChain.doFilter(requestMock, null);
+    filterChain.doFilter(anyObject(ServletRequest.class), isNull(ServletResponse.class));
     control.replay();
     pipeline.dispatch(requestMock, null, filterChain);
     pipeline.destroyPipeline();
@@ -268,7 +270,7 @@ public class FilterDispatchIntegrationTest extends TestCase {
     expect(requestMock.getContextPath()).andReturn("").anyTimes();
     // dispatch request
     FilterChain filterChain = control.createMock(FilterChain.class);
-    filterChain.doFilter(requestMock, null);
+    filterChain.doFilter(anyObject(ServletRequest.class), isNull(ServletResponse.class));
     control.replay();
     pipeline.dispatch(requestMock, null, filterChain);
     control.verify();
