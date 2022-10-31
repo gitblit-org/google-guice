@@ -95,7 +95,7 @@ public class ModuleIncludesTest extends TestCase {
       assertThat(e)
           .hasMessageThat()
           .contains(
-              "Duplicate module instances provided for " + ModuleWithIdentity.class.getName());
+              "Duplicate module instances provided for ModuleIncludesTest$ModuleWithIdentity:");
     }
   }
 
@@ -123,5 +123,45 @@ public class ModuleIncludesTest extends TestCase {
                 ModuleWithInstanceProvidesMethod.class, new ModuleWithInstanceProvidesMethod()));
     assertThat(classLiteralFirst.getInstance(Integer.class)).isEqualTo(0);
     assertThat(classLiteralFirst.getInstance(Integer.class)).isEqualTo(1);
+  }
+
+  @Module(includes = ModuleWithInstanceProvidesMethod.class)
+  static final class IncludesInstanceModule {}
+
+  public void testIncludesInstanceModule() {
+    Injector injector = Guice.createInjector(DaggerAdapter.from(IncludesInstanceModule.class));
+    assertThat(injector.getInstance(Integer.class)).isEqualTo(0);
+    assertThat(injector.getInstance(Integer.class)).isEqualTo(1);
+  }
+
+  @Module
+  static final class NonInstantiableModuleWithInstanceProvidesMethod {
+    private int i;
+
+    NonInstantiableModuleWithInstanceProvidesMethod(int i) {
+      throw new RuntimeException("nothing should ever instantiate this");
+    }
+
+    @Provides
+    int i() {
+      return i++;
+    }
+  }
+
+  @Module(includes = NonInstantiableModuleWithInstanceProvidesMethod.class)
+  static final class IncludesNonInstantiableInstanceModule {}
+
+  public void testIncludesNonInstantiableInstanceModule() {
+    try {
+      Guice.createInjector(DaggerAdapter.from(IncludesNonInstantiableInstanceModule.class));
+      fail();
+    } catch (CreationException expected) {
+      assertThat(expected)
+          .hasMessageThat()
+          .contains(
+              "NonInstantiableModuleWithInstanceProvidesMethod.i() is an instance method,"
+                  + " but a class literal was passed. Make this method static or pass an instance"
+                  + " of the module instead.");
+    }
   }
 }

@@ -16,22 +16,28 @@
 
 package com.google.inject.testing.fieldbinder;
 
+import static java.util.Arrays.stream;
+
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.AbstractModule;
 import com.google.inject.Binder;
 import com.google.inject.BindingAnnotation;
 import com.google.inject.ConfigurationException;
 import com.google.inject.Key;
 import com.google.inject.Module;
 import com.google.inject.Provider;
+import com.google.inject.RestrictedBindingSource;
 import com.google.inject.TypeLiteral;
 import com.google.inject.binder.AnnotatedBindingBuilder;
 import com.google.inject.binder.LinkedBindingBuilder;
 import com.google.inject.internal.Annotations;
+import com.google.inject.internal.KotlinSupport;
 import com.google.inject.internal.MoreTypes;
 import com.google.inject.internal.Nullability;
+import com.google.inject.spi.InjectionPoint;
 import com.google.inject.spi.Message;
 import com.google.inject.util.Providers;
 import java.lang.annotation.Annotation;
@@ -40,10 +46,11 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 
 /**
- * Automatically creates Guice bindings for fields in an object annotated with {@link Bind}.
+ * A Guice module that automatically adds Guice bindings into the injector for all {@link Bind}
+ * annotated fields of a specified object.
  *
- * <p>This module is intended for use in tests to reduce the code needed to bind local fields
- * (usually mocks) for injection.
+ * <p>This module is intended for use in tests to reduce the amount of boilerplate code needed to
+ * bind local fields (usually mocks) for injection.
  *
  * <p>The following rules are followed in determining how fields are bound using this module:
  *
@@ -119,6 +126,48 @@ public final class BoundFieldModule implements Module {
    */
   public static BoundFieldModule of(Object instance) {
     return new BoundFieldModule(instance);
+  }
+
+  /**
+   * Wrapper of BoundFieldModule which enables attaching {@link @RestrictedBindingSource} permits to
+   * instances of it.
+   *
+   * <p>To create an instance of BoundFieldModule with permits (to enable it to bind restricted
+   * bindings), create an instance of an anonymous class extending this one and annotate it with
+   * those permits. For example: {@code new @Permit1 @Permit2 BoundFieldModule.WithPermits(instance)
+   * {}}.
+   *
+   * @since 5.0
+   */
+  public static class WithPermits extends AbstractModule {
+    private final Object instance;
+
+    protected WithPermits(Object instance) {
+      this.instance = instance;
+      // TODO(user): Enforce this at compile-time (e.g. via ErrorProne).
+      Preconditions.checkState(
+          getClass().isAnonymousClass()
+              && (hasPermitAnnotation(getClass().getAnnotations())
+                  || hasPermitAnnotation(getClass().getAnnotatedSuperclass().getAnnotations())),
+          "This class should only be used as a base class for an anonymous class with"
+              + " @RestrictedBindingSource.Permit annotations. For example in Java: `new "
+              + " BoundFieldModule.@FooPermit WithPermits(instance) {}` or in Kotlin: "
+              + " `@FooPermits object : BoundFiledModule.WithPermits(instance) {}`");
+    }
+
+    @Override
+    protected void configure() {
+      install(BoundFieldModule.of(instance));
+    }
+
+    private static boolean hasPermitAnnotation(Annotation[] annotations) {
+      return stream(annotations)
+          .anyMatch(
+              annotation ->
+                  annotation
+                      .annotationType()
+                      .isAnnotationPresent(RestrictedBindingSource.Permit.class));
+    }
   }
 
   private static class BoundFieldException extends Exception {
@@ -235,7 +284,7 @@ public final class BoundFieldModule implements Module {
 
     private Annotation computeBindingAnnotation() throws BoundFieldException {
       Annotation found = null;
-      for (Annotation annotation : field.getAnnotations()) {
+      for (Annotation annotation : InjectionPoint.getAnnotations(field)) {
         Class<? extends Annotation> annotationType = annotation.annotationType();
         if (Annotations.isBindingAnnotation(annotationType)) {
           if (found != null) {
@@ -307,7 +356,9 @@ public final class BoundFieldModule implements Module {
     /** Returns whether a binding supports null values. */
     private boolean allowsNull() {
       return !isTransparentProvider(fieldType.getRawType())
-          && Nullability.allowsNull(field.getAnnotations());
+          && (Nullability.hasNullableAnnotation(field.getAnnotations())
+              || Nullability.hasNullableAnnotation(field.getAnnotatedType().getAnnotations())
+              || KotlinSupport.getInstance().isNullable(field));
     }
   }
 
@@ -408,7 +459,8 @@ public final class BoundFieldModule implements Module {
   }
 
   private static void bindField(Binder binder, final BoundFieldInfo fieldInfo) {
-    LinkedBindingBuilder<?> linkedBinder = binder.bind(fieldInfo.boundKey);
+    LinkedBindingBuilder<?> linkedBinder =
+        binder.withSource(fieldInfo.field).bind(fieldInfo.boundKey);
 
     // It's unfortunate that Field.get() just returns Object rather than the actual type (although
     // that would be impossible) because as a result calling binder.toInstance or binder.toProvider
@@ -426,16 +478,12 @@ public final class BoundFieldModule implements Module {
               @Override
               // @Nullable
               public Object get() {
-                // This is safe because we checked that the field's type is Provider above.
-                @SuppressWarnings("unchecked")
                 javax.inject.Provider<?> provider =
                     (javax.inject.Provider<?>) getFieldValue(fieldInfo);
                 return provider.get();
               }
             });
       } else {
-        // This is safe because we checked that the field's type is Provider above.
-        @SuppressWarnings("unchecked")
         javax.inject.Provider<?> fieldValueUnsafe =
             (javax.inject.Provider<?>) getFieldValue(fieldInfo);
         binderUnsafe.toProvider(fieldValueUnsafe);

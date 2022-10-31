@@ -32,9 +32,12 @@ final class InterceptorBindingProcessor extends AbstractProcessor {
 
   @Override
   public Boolean visit(InterceptorBinding command) {
-    injector.state.addMethodAspect(
-        new MethodAspect(
-            command.getClassMatcher(), command.getMethodMatcher(), command.getInterceptors()));
+    if (InternalFlags.isBytecodeGenEnabled()) {
+      injector.getBindingData().addInterceptorBinding(command);
+    } else {
+      errors.aopDisabled(command);
+    }
+
     return true;
   }
 }

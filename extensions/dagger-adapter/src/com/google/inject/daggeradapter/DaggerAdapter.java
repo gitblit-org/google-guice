@@ -15,24 +15,32 @@
  */
 package com.google.inject.daggeradapter;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getFirst;
 import static com.google.inject.daggeradapter.SupportedAnnotations.isAnnotationSupported;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimaps;
 import com.google.inject.Binder;
 import com.google.inject.Module;
+import com.google.inject.internal.Errors;
 import com.google.inject.internal.ProviderMethodsModule;
+import com.google.inject.spi.Message;
 import com.google.inject.spi.ModuleAnnotatedMethodScanner;
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -57,7 +65,6 @@ import java.util.Set;
  *
  * <ul>
  *   <li>Dagger provider methods have a "SET_VALUES" provision mode not supported by Guice.
- *   <li>MapBindings are not yet implemented (pending).
  *   <li>Be careful about stateful modules. In contrast to Dagger (where components are expected to
  *       be recreated on-demand with new Module instances), Guice typically has a single injector
  *       with a long lifetime, so your module instance will be used throughout the lifetime of the
@@ -70,12 +77,52 @@ import java.util.Set;
  *       annotation.
  * </ul>
  *
- * @author cgruber@google.com (Christian Gruber)
+ * <p>If methods need to be ignored based on a condtion, a {@code Predicate<Method>} can be used
+ * passed to {@link DaggerAdapter.Builder#filter}, as in {@code
+ * DaggerAdapter.builder().addModules(...).filter(predicate).build()}. Only the methods which
+ * satisfy the predicate will be processed.
  */
 public final class DaggerAdapter {
   /** Creates a new {@link DaggerAdapter} from {@code daggerModuleObjects}. */
   public static Module from(Object... daggerModuleObjects) {
-    return new DaggerCompatibilityModule(ImmutableList.copyOf(daggerModuleObjects));
+    return builder().addModules(ImmutableList.copyOf(daggerModuleObjects)).build();
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /**
+   * Builder for setting configuration options on DaggerAdapter.
+   *
+   * @since 5.0
+   */
+  public static class Builder {
+    private final ImmutableList.Builder<Object> modules = ImmutableList.builder();
+    private Predicate<Method> predicate = Predicates.alwaysTrue();
+
+    /** Returns a module that will configure bindings based on the modules & scanners. */
+    public Module build() {
+      return new DaggerCompatibilityModule(this);
+    }
+
+    /**
+     * Adds modules (which can be classes annotated with {@link dagger.Module}, or instances of
+     * those classes) which will be scanned for bindings.
+     */
+    public Builder addModules(Iterable<Object> daggerModuleObjects) {
+      this.modules.addAll(daggerModuleObjects);
+      return this;
+    }
+
+    /**
+     * Limit the adapter to a subset of {@code methods} from {@link @dagger.Module} annotated
+     * classes which satisfy the {@code predicate}. Defaults to allowing all.
+     */
+    public Builder filter(Predicate<Method> predicate) {
+      this.predicate = checkNotNull(predicate, "predicate");
+      return this;
+    }
   }
 
   /**
@@ -85,21 +132,69 @@ public final class DaggerAdapter {
    */
   private static final class DaggerCompatibilityModule implements Module {
     private final ImmutableList<Object> declaredModules;
+    private final Predicate<Method> predicate;
 
-    private DaggerCompatibilityModule(ImmutableList<Object> declaredModules) {
-      this.declaredModules = declaredModules;
+    private DaggerCompatibilityModule(Builder builder) {
+      this.declaredModules = builder.modules.build();
+      this.predicate = builder.predicate;
     }
 
     @Override
     public void configure(Binder binder) {
       binder = binder.skipSources(getClass());
+      ModuleAnnotatedMethodScanner scanner = DaggerMethodScanner.create(predicate);
       for (Object module : deduplicateModules(binder, transitiveModules())) {
         checkIsDaggerModule(module, binder);
         validateNoSubcomponents(binder, module);
-        checkUnsupportedDaggerAnnotations(module, binder);
-
-        binder.install(ProviderMethodsModule.forModule(module, DaggerMethodScanner.INSTANCE));
+        ImmutableList<Method> declaredMethods = allDeclaredMethods(moduleClass(module));
+        checkUnsupportedDaggerAnnotations(declaredMethods, binder);
+        module = instantiateIfNecessary(module, declaredMethods, binder);
+        binder.install(ProviderMethodsModule.forModule(module, scanner));
       }
+    }
+
+    /**
+     * Returns an instance of the module if instantiation is necessary and succeeds. Otherwise,
+     * return the original module (which could already be an instance or a class) and allow things
+     * to proceed.
+     */
+    private static Object instantiateIfNecessary(
+        Object module, List<Method> declaredMethods, Binder binder) {
+      // If the module is already an object, no need to instantiate.
+      if (!(module instanceof Class)) {
+        return module;
+      }
+
+      // If none of the methods require instances, no need to instantiate.
+      if (declaredMethods.stream().noneMatch(DaggerCompatibilityModule::methodRequiresInstance)) {
+        return module;
+      }
+
+      try {
+        Constructor<?> cxtor = ((Class<?>) module).getDeclaredConstructor();
+        cxtor.setAccessible(true);
+        return cxtor.newInstance();
+      } catch (NoSuchMethodException nsee) {
+        // If no no-args cxtor exists, just return the class. We'll fail with a better error
+        // message later on.
+        return module;
+      } catch (ReflectiveOperationException roe) {
+        // If instantiation failed, record the error and proceed. We'll add additional good
+        // error message later on.
+        binder.addError(
+            new Message(
+                Errors.format("Unable to create an instance of %s for DaggerAdapter", module),
+                roe));
+        return module;
+      }
+    }
+
+    private static boolean methodRequiresInstance(Method m) {
+      return !m.isBridge()
+          && !m.isSynthetic()
+          && !Modifier.isStatic(m.getModifiers())
+          && !Modifier.isAbstract(m.getModifiers())
+          && SupportedAnnotations.BINDING_ANNOTATIONS.stream().anyMatch(m::isAnnotationPresent);
     }
 
     private void checkIsDaggerModule(Object module, Binder binder) {
@@ -111,8 +206,9 @@ public final class DaggerAdapter {
       }
     }
 
-    private static void checkUnsupportedDaggerAnnotations(Object module, Binder binder) {
-      for (Method method : allDeclaredMethods(moduleClass(module))) {
+    private static void checkUnsupportedDaggerAnnotations(
+        Iterable<Method> declaredMethods, Binder binder) {
+      for (Method method : declaredMethods) {
         for (Annotation annotation : method.getAnnotations()) {
           Class<? extends Annotation> annotationClass = annotation.annotationType();
           if (annotationClass.getName().startsWith("dagger.")
@@ -127,7 +223,9 @@ public final class DaggerAdapter {
 
     private static ImmutableList<Method> allDeclaredMethods(Class<?> clazz) {
       ImmutableList.Builder<Method> methods = ImmutableList.builder();
-      for (Class<?> current = clazz; current != null; current = current.getSuperclass()) {
+      for (Class<?> current = clazz;
+          current != Object.class && current != null;
+          current = current.getSuperclass()) {
         methods.add(current.getDeclaredMethods());
       }
       return methods.build();

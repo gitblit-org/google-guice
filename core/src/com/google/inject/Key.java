@@ -21,14 +21,15 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.inject.internal.Annotations.generateAnnotation;
 import static com.google.inject.internal.Annotations.isAllDefaultMethods;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import com.google.inject.internal.Annotations;
 import com.google.inject.internal.MoreTypes;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 
 /**
- * Binding key consisting of an injection type and an optional annotation. Matches the type and
- * annotation at a point of injection.
+ * Guice uses Key objects to identify a dependency that can be resolved by the Guice {@link
+ * Injector}. A Guice key consists of an injection type and an optional annotation.
  *
  * <p>For example, {@code Key.get(Service.class, Transactional.class)} will match:
  *
@@ -47,6 +48,7 @@ import java.lang.reflect.Type;
  *
  * @author crazybob@google.com (Bob Lee)
  */
+@CheckReturnValue
 public class Key<T> {
 
   private final AnnotationStrategy annotationStrategy;
@@ -206,7 +208,7 @@ public class Key<T> {
     // method.
     String local = toString;
     if (local == null) {
-      local = "Key[type=" + typeLiteral + ", annotation=" + annotationStrategy + "]";
+      local = "Key[type=" + typeLiteral + ", annotation=" + annotationStrategy + ']';
       toString = local;
     }
     return local;
@@ -234,17 +236,17 @@ public class Key<T> {
 
   /** Gets a key for an injection type. */
   public static Key<?> get(Type type) {
-    return new Key<Object>(type, NullAnnotationStrategy.INSTANCE);
+    return new Key<>(type, NullAnnotationStrategy.INSTANCE);
   }
 
   /** Gets a key for an injection type and an annotation type. */
   public static Key<?> get(Type type, Class<? extends Annotation> annotationType) {
-    return new Key<Object>(type, strategyFor(annotationType));
+    return new Key<>(type, strategyFor(annotationType));
   }
 
   /** Gets a key for an injection type and an annotation. */
   public static Key<?> get(Type type, Annotation annotation) {
-    return new Key<Object>(type, strategyFor(annotation));
+    return new Key<>(type, strategyFor(annotation));
   }
 
   /** Gets a key for an injection type. */
@@ -268,8 +270,8 @@ public class Key<T> {
    *
    * @since 3.0
    */
-  public <T> Key<T> ofType(Class<T> type) {
-    return new Key<T>(type, annotationStrategy);
+  public <U> Key<U> ofType(Class<U> type) {
+    return new Key<>(type, annotationStrategy);
   }
 
   /**
@@ -278,7 +280,7 @@ public class Key<T> {
    * @since 3.0
    */
   public Key<?> ofType(Type type) {
-    return new Key<Object>(type, annotationStrategy);
+    return new Key<>(type, annotationStrategy);
   }
 
   /**
@@ -286,8 +288,32 @@ public class Key<T> {
    *
    * @since 3.0
    */
-  public <T> Key<T> ofType(TypeLiteral<T> type) {
-    return new Key<T>(type, annotationStrategy);
+  public <U> Key<U> ofType(TypeLiteral<U> type) {
+    return new Key<U>(type, annotationStrategy);
+  }
+
+  /**
+   * Returns a new key of the same type with the specified annotation.
+   *
+   * <p>This is equivalent to {@code Key.get(key.getTypeLiteral(), annotation)} but may be more
+   * convenient to use in certain cases.
+   *
+   * @since 5.0
+   */
+  public Key<T> withAnnotation(Class<? extends Annotation> annotationType) {
+    return new Key<T>(typeLiteral, strategyFor(annotationType));
+  }
+
+  /**
+   * Returns a new key of the same type with the specified annotation.
+   *
+   * <p>This is equivalent to {@code Key.get(key.getTypeLiteral(), annotation)} but may be more
+   * convenient to use in certain cases.
+   *
+   * @since 5.0
+   */
+  public Key<T> withAnnotation(Annotation annotation) {
+    return new Key<T>(typeLiteral, strategyFor(annotation));
   }
 
   /**
@@ -487,7 +513,7 @@ public class Key<T> {
 
     @Override
     public String toString() {
-      return "@" + annotationType.getName();
+      return '@' + annotationType.getName();
     }
   }
 }

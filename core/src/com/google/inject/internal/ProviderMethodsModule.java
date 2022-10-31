@@ -19,6 +19,7 @@ package com.google.inject.internal;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.base.Objects;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -294,28 +295,27 @@ public final class ProviderMethodsModule implements Module {
     @SuppressWarnings("unchecked") // Define T as the method's return type.
     TypeLiteral<T> returnType = (TypeLiteral<T>) typeLiteral.getReturnType(method);
     Key<T> key = getKey(errors, returnType, method, method.getAnnotations());
+    boolean prepareMethodError = false;
     try {
       key = scanner.prepareMethod(binder, annotation, key, point);
     } catch (Throwable t) {
+      prepareMethodError = true;
       binder.addError(t);
     }
 
     if (Modifier.isAbstract(method.getModifiers())) {
       checkState(
-          key == null,
+          prepareMethodError || key == null,
           "%s returned a non-null key (%s) for %s. prepareMethod() must return null for abstract"
               + " methods",
           scanner,
           key,
           method);
       return null;
-    } else {
-      checkState(
-          key != null,
-          "%s returned a null key for %s. prepareMethod() can only return null for abstract"
-              + " methods",
-          scanner,
-          method);
+    }
+
+    if (key == null) { // scanner returned null. Skipping the binding.
+      return null;
     }
 
     Class<? extends Annotation> scopeAnnotation =
@@ -327,7 +327,7 @@ public final class ProviderMethodsModule implements Module {
     return ProviderMethod.create(
         key,
         method,
-        isStaticModule() ? null : delegate,
+        isStaticModule() || Modifier.isStatic(method.getModifiers()) ? null : delegate,
         ImmutableSet.copyOf(point.getDependencies()),
         scopeAnnotation,
         skipFastClassGeneration,
@@ -343,11 +343,20 @@ public final class ProviderMethodsModule implements Module {
   public boolean equals(Object o) {
     return o instanceof ProviderMethodsModule
         && ((ProviderMethodsModule) o).delegate == delegate
-        && ((ProviderMethodsModule) o).scanner == scanner;
+        && ((ProviderMethodsModule) o).scanner.equals(scanner);
   }
 
   @Override
   public int hashCode() {
-    return delegate.hashCode();
+    return Objects.hashCode(delegate, scanner);
+  }
+
+  /** Is it scanning the built-in @Provides* methods. */
+  public boolean isScanningBuiltInProvidesMethods() {
+    return scanner == ProvidesMethodScanner.INSTANCE;
+  }
+
+  public ModuleAnnotatedMethodScanner getScanner() {
+    return scanner;
   }
 }

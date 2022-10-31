@@ -20,7 +20,9 @@ import static com.google.inject.internal.MoreTypes.getRawType;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.ObjectArrays;
 import com.google.inject.ConfigurationException;
 import com.google.inject.Inject;
 import com.google.inject.Key;
@@ -29,24 +31,29 @@ import com.google.inject.internal.Annotations;
 import com.google.inject.internal.DeclaredMembers;
 import com.google.inject.internal.Errors;
 import com.google.inject.internal.ErrorsException;
+import com.google.inject.internal.KotlinSupport;
 import com.google.inject.internal.Nullability;
 import com.google.inject.internal.util.Classes;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedElement;
+import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * A constructor, field or method that can receive injections. Typically this is a member with the
@@ -69,15 +76,31 @@ public final class InjectionPoint {
     this.member = method;
     this.declaringType = declaringType;
     this.optional = optional;
-    this.dependencies = forMember(method, declaringType, method.getParameterAnnotations());
+    this.dependencies =
+        forMember(
+            new Errors(method),
+            method,
+            declaringType,
+            method.getAnnotatedParameterTypes(),
+            method.getParameterAnnotations(),
+            KotlinSupport.getInstance().getIsParameterKotlinNullablePredicate(method));
   }
 
   InjectionPoint(TypeLiteral<?> declaringType, Constructor<?> constructor) {
     this.member = constructor;
     this.declaringType = declaringType;
     this.optional = false;
+    Errors errors = new Errors(constructor);
+    KotlinSupport.getInstance().checkConstructorParameterAnnotations(constructor, errors);
+
     this.dependencies =
-        forMember(constructor, declaringType, constructor.getParameterAnnotations());
+        forMember(
+            errors,
+            constructor,
+            declaringType,
+            constructor.getAnnotatedParameterTypes(),
+            constructor.getParameterAnnotations(),
+            KotlinSupport.getInstance().getIsParameterKotlinNullablePredicate(constructor));
   }
 
   InjectionPoint(TypeLiteral<?> declaringType, Field field, boolean optional) {
@@ -85,8 +108,8 @@ public final class InjectionPoint {
     this.declaringType = declaringType;
     this.optional = optional;
 
-    Annotation[] annotations = field.getAnnotations();
-
+    Annotation[] annotations = getAnnotations(field);
+    Annotation[] typeUseAnnotations = field.getAnnotatedType().getAnnotations();
     Errors errors = new Errors(field);
     Key<?> key = null;
     try {
@@ -98,23 +121,33 @@ public final class InjectionPoint {
     }
     errors.throwConfigurationExceptionIfErrorsExist();
 
-    this.dependencies =
-        ImmutableList.<Dependency<?>>of(
-            newDependency(key, Nullability.allowsNull(annotations), -1));
+    boolean allowsNull =
+        Nullability.hasNullableAnnotation(annotations)
+            || Nullability.hasNullableAnnotation(typeUseAnnotations)
+            || KotlinSupport.getInstance().isNullable(field);
+    this.dependencies = ImmutableList.<Dependency<?>>of(newDependency(key, allowsNull, -1));
   }
 
   private ImmutableList<Dependency<?>> forMember(
-      Member member, TypeLiteral<?> type, Annotation[][] paramterAnnotations) {
-    Errors errors = new Errors(member);
-
+      Errors errors,
+      Member member,
+      TypeLiteral<?> type,
+      AnnotatedType[] annotatedTypes,
+      Annotation[][] parameterAnnotationsPerParameter,
+      Predicate<Integer> isParameterKotlinNullable) {
     List<Dependency<?>> dependencies = Lists.newArrayList();
     int index = 0;
 
     for (TypeLiteral<?> parameterType : type.getParameterTypes(member)) {
       try {
-        Annotation[] parameterAnnotations = paramterAnnotations[index];
+        Annotation[] typeAnnotations = annotatedTypes[index].getAnnotations();
+        Annotation[] parameterAnnotations = parameterAnnotationsPerParameter[index];
         Key<?> key = Annotations.getKey(parameterType, member, parameterAnnotations, errors);
-        dependencies.add(newDependency(key, Nullability.allowsNull(parameterAnnotations), index));
+        boolean isNullable =
+            Nullability.hasNullableAnnotation(parameterAnnotations)
+                || Nullability.hasNullableAnnotation(typeAnnotations)
+                || isParameterKotlinNullable.test(index);
+        dependencies.add(newDependency(key, isNullable, index));
         index++;
       } catch (ConfigurationException e) {
         errors.merge(e.getErrorMessages());
@@ -229,6 +262,9 @@ public final class InjectionPoint {
   /**
    * Returns a new injection point for the injectable constructor of {@code type}.
    *
+   * <p>Either a {@code @Inject} annotated constructor or a non-private no arg constructor is
+   * required to be defined by the class corresponding to {@code type}.
+   *
    * @param type a concrete type with exactly one constructor annotated {@literal @}{@link Inject},
    *     or a no-arguments constructor that is not private.
    * @throws ConfigurationException if there is no injectable constructor, more than one injectable
@@ -236,36 +272,54 @@ public final class InjectionPoint {
    *     parameter with multiple binding annotations.
    */
   public static InjectionPoint forConstructorOf(TypeLiteral<?> type) {
+    return forConstructorOf(type, false);
+  }
+
+  /**
+   * Returns a new injection point for the injectable constructor of {@code type}.
+   *
+   * <p>If {@code atInjectRequired} is true, the constructor must be annotated with {@code @Inject}.
+   * If {@code atInjectRequired} is false, either a {@code @Inject} annotated constructor or a
+   * non-private no arg constructor is required to be defined by the class corresponding to {@code
+   * type}.
+   *
+   * @param type a concrete type with exactly one constructor annotated {@code @Inject}, or a
+   *     no-arguments constructor that is not private.
+   * @param atInjectRequired whether the constructor must be annotated with {@code Inject}.
+   * @throws ConfigurationException if there is no injectable constructor, more than one injectable
+   *     constructor, or if parameters of the injectable constructor are malformed, such as a
+   *     parameter with multiple binding annotations.
+   * @since 5.0
+   */
+  public static InjectionPoint forConstructorOf(TypeLiteral<?> type, boolean atInjectRequired) {
     Class<?> rawType = getRawType(type.getType());
     Errors errors = new Errors(rawType);
 
+    List<Constructor<?>> atInjectConstructors =
+        Arrays.stream(rawType.getDeclaredConstructors())
+            .filter(
+                constructor ->
+                    constructor.isAnnotationPresent(Inject.class)
+                        || constructor.isAnnotationPresent(javax.inject.Inject.class))
+            .collect(Collectors.toList());
+
     Constructor<?> injectableConstructor = null;
-    for (Constructor<?> constructor : rawType.getDeclaredConstructors()) {
+    atInjectConstructors.stream()
+        .filter(constructor -> constructor.isAnnotationPresent(Inject.class))
+        .filter(constructor -> constructor.getAnnotation(Inject.class).optional())
+        .forEach(errors::optionalConstructor);
 
-      boolean optional;
-      Inject guiceInject = constructor.getAnnotation(Inject.class);
-      if (guiceInject == null) {
-        javax.inject.Inject javaxInject = constructor.getAnnotation(javax.inject.Inject.class);
-        if (javaxInject == null) {
-          continue;
-        }
-        optional = false;
-      } else {
-        optional = guiceInject.optional();
-      }
-
-      if (optional) {
-        errors.optionalConstructor(constructor);
-      }
-
+    if (atInjectConstructors.size() > 1) {
+      errors.tooManyConstructors(rawType);
+    } else {
+      injectableConstructor = Iterables.getOnlyElement(atInjectConstructors, null);
       if (injectableConstructor != null) {
-        errors.tooManyConstructors(rawType);
+        checkForMisplacedBindingAnnotations(injectableConstructor, errors);
       }
-
-      injectableConstructor = constructor;
-      checkForMisplacedBindingAnnotations(injectableConstructor, errors);
     }
-
+    if (atInjectRequired && injectableConstructor == null) {
+      errors.atInjectRequired(type);
+    }
     errors.throwConfigurationExceptionIfErrorsExist();
 
     if (injectableConstructor != null) {
@@ -824,11 +878,27 @@ public final class InjectionPoint {
     return a.getDeclaringClass().getPackage().equals(b.getDeclaringClass().getPackage());
   }
 
+  /**
+   * Returns all the annotations on a field. If Kotlin-support is enabled, the annotations will
+   * include annotations on the related Kotlin-property.
+   *
+   * @since 5.0
+   */
+  public static Annotation[] getAnnotations(Field field) {
+    Annotation[] javaAnnotations = field.getAnnotations();
+    Annotation[] kotlinAnnotations = KotlinSupport.getInstance().getAnnotations(field);
+
+    if (kotlinAnnotations.length == 0) {
+      return javaAnnotations;
+    }
+    return ObjectArrays.concat(javaAnnotations, kotlinAnnotations, Annotation.class);
+  }
+
   /** A method signature. Used to handle method overridding. */
   static class Signature {
 
     final String name;
-    final Class[] parameterTypes;
+    final Class<?>[] parameterTypes;
     final int hash;
 
     Signature(Method method) {
@@ -837,7 +907,7 @@ public final class InjectionPoint {
 
       int h = name.hashCode();
       h = h * 31 + parameterTypes.length;
-      for (Class parameterType : parameterTypes) {
+      for (Class<?> parameterType : parameterTypes) {
         h = h * 31 + parameterType.hashCode();
       }
       this.hash = h;

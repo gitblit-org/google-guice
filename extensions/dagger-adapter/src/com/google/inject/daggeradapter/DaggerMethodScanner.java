@@ -15,12 +15,15 @@
  */
 package com.google.inject.daggeradapter;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.inject.daggeradapter.Annotations.getAnnotatedAnnotation;
 import static com.google.inject.daggeradapter.Keys.parameterKey;
 import static com.google.inject.daggeradapter.SupportedAnnotations.supportedBindingAnnotations;
 
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Binder;
@@ -35,6 +38,7 @@ import com.google.inject.spi.InjectionPoint;
 import com.google.inject.spi.ModuleAnnotatedMethodScanner;
 import dagger.Binds;
 import dagger.BindsOptionalOf;
+import dagger.MapKey;
 import dagger.Provides;
 import dagger.multibindings.IntoMap;
 import dagger.multibindings.IntoSet;
@@ -44,6 +48,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import javax.inject.Scope;
 
@@ -53,17 +58,12 @@ import javax.inject.Scope;
  * @author cgruber@google.com (Christian Gruber)
  */
 final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
-  /**
-   * A single instance is not necessary for the correctness or performance of the scanner, but it
-   * does suffice an invariant of {@link com.google.inject.internal.ProviderMethodsModule}, which
-   * uses scanner equality in its own equality semantics. If multiple modules use
-   * DaggerAdapter.from(FooModule.class) separately, and thus are not deduplicated by DaggerAdapter
-   * on their own, Guice will do so as long as this scanner is always equal.
-   *
-   * <p>If we do away with this singleton instance, we need to be sure that we do so in a way that
-   * maintains equality in these cases.
-   */
-  static final DaggerMethodScanner INSTANCE = new DaggerMethodScanner();
+
+  static DaggerMethodScanner create(Predicate<Method> predicate) {
+    return new DaggerMethodScanner(predicate);
+  }
+
+  private final Predicate<Method> predicate;
 
   @Override
   public ImmutableSet<Class<? extends Annotation>> annotationClasses() {
@@ -74,9 +74,12 @@ final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
   public <T> Key<T> prepareMethod(
       Binder binder, Annotation annotation, Key<T> key, InjectionPoint injectionPoint) {
     Method method = (Method) injectionPoint.getMember();
+    if (!predicate.apply(method)) {
+      return null;
+    }
     Class<? extends Annotation> annotationType = annotation.annotationType();
     if (annotationType.equals(Provides.class)) {
-      return prepareProvidesKey(binder, method, key);
+      return processMultibindingAnnotations(binder, method, key);
     } else if (annotationType.equals(Binds.class)) {
       configureBindsKey(binder, method, key);
       return null;
@@ -89,12 +92,6 @@ final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
     }
 
     throw new UnsupportedOperationException(annotation.toString());
-  }
-
-  private <T> Key<T> prepareProvidesKey(Binder binder, Method method, Key<T> key) {
-    key = processMultibindingAnnotations(binder, method, key);
-
-    return key;
   }
 
   private <T> void configureBindsKey(Binder binder, Method method, Key<T> key) {
@@ -123,7 +120,7 @@ final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
   private static <T> Key<T> processSetBinding(Binder binder, Key<T> key) {
     Multibinder<T> setBinder = newSetBinder(binder, key.getTypeLiteral(), key.getAnnotation());
 
-    Key<T> contributionKey = Key.get(key.getTypeLiteral(), UniqueAnnotations.create());
+    Key<T> contributionKey = key.withAnnotation(UniqueAnnotations.create());
     setBinder.addBinding().to(contributionKey);
     return contributionKey;
   }
@@ -133,14 +130,19 @@ final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
     MapBinder<K, V> mapBinder =
         newMapBinder(binder, mapKeyData.typeLiteral, key.getTypeLiteral(), key.getAnnotation());
 
-    Key<V> contributionKey = Key.get(key.getTypeLiteral(), UniqueAnnotations.create());
+    Key<V> contributionKey = key.withAnnotation(UniqueAnnotations.create());
     mapBinder.addBinding(mapKeyData.key).to(contributionKey);
     return contributionKey;
   }
 
   private static <K> MapKeyData<K> mapKeyData(Method method) {
-    Annotation mapKey = getAnnotatedAnnotation(method, dagger.MapKey.class).get();
-    dagger.MapKey mapKeyDefinition = mapKey.annotationType().getAnnotation(dagger.MapKey.class);
+    Optional<Annotation> mapKeyOpt = getAnnotatedAnnotation(method, MapKey.class);
+    checkState(
+        mapKeyOpt.isPresent(),
+        "Missing @MapKey annotation on method %s (make sure the annotation has RUNTIME rentention)",
+        method);
+    Annotation mapKey = mapKeyOpt.get();
+    MapKey mapKeyDefinition = mapKey.annotationType().getAnnotation(MapKey.class);
     if (!mapKeyDefinition.unwrapValue()) {
       return MapKeyData.create(TypeLiteral.get(mapKey.annotationType()), mapKey);
     }
@@ -209,5 +211,26 @@ final class DaggerMethodScanner extends ModuleAnnotatedMethodScanner {
     }
   }
 
-  private DaggerMethodScanner() {}
+  @Override
+  public boolean equals(Object object) {
+    if (object instanceof DaggerMethodScanner) {
+      DaggerMethodScanner that = (DaggerMethodScanner) object;
+      return this.predicate.equals(that.predicate);
+    }
+    return false;
+  }
+
+  @Override
+  public int hashCode() {
+    return predicate.hashCode();
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this).add("predicate", predicate).toString();
+  }
+
+  private DaggerMethodScanner(Predicate<Method> predicate) {
+    this.predicate = predicate;
+  }
 }

@@ -99,7 +99,7 @@ public class MoreTypes {
       @SuppressWarnings("unchecked")
       TypeLiteral<T> guiceProviderType =
           (TypeLiteral<T>)
-              TypeLiteral.get(Types.providerOf(parameterizedType.getActualTypeArguments()[0]));
+              TypeLiteral.get(Types.providerOf(getSharedTypeArguments(parameterizedType)[0]));
       return guiceProviderType;
     }
 
@@ -151,8 +151,7 @@ public class MoreTypes {
 
     } else if (type instanceof ParameterizedType) {
       ParameterizedType p = (ParameterizedType) type;
-      return new ParameterizedTypeImpl(
-          p.getOwnerType(), p.getRawType(), p.getActualTypeArguments());
+      return new ParameterizedTypeImpl(p.getOwnerType(), p.getRawType(), getSharedTypeArguments(p));
 
     } else if (type instanceof GenericArrayType) {
       GenericArrayType g = (GenericArrayType) type;
@@ -221,12 +220,11 @@ public class MoreTypes {
         return false;
       }
 
-      // TODO: save a .clone() call
       ParameterizedType pa = (ParameterizedType) a;
       ParameterizedType pb = (ParameterizedType) b;
       return Objects.equal(pa.getOwnerType(), pb.getOwnerType())
           && pa.getRawType().equals(pb.getRawType())
-          && Arrays.equals(pa.getActualTypeArguments(), pb.getActualTypeArguments());
+          && Arrays.equals(getSharedTypeArguments(pa), getSharedTypeArguments(pb));
 
     } else if (a instanceof GenericArrayType) {
       if (!(b instanceof GenericArrayType)) {
@@ -282,7 +280,7 @@ public class MoreTypes {
 
     // we skip searching through interfaces if unknown is an interface
     if (toResolve.isInterface()) {
-      Class[] interfaces = rawType.getInterfaces();
+      Class<?>[] interfaces = rawType.getInterfaces();
       for (int i = 0, length = interfaces.length; i < length; i++) {
         if (interfaces[i] == toResolve) {
           return rawType.getGenericInterfaces()[i];
@@ -309,7 +307,7 @@ public class MoreTypes {
     return toResolve;
   }
 
-  public static Type resolveTypeVariable(Type type, Class<?> rawType, TypeVariable unknown) {
+  public static Type resolveTypeVariable(Type type, Class<?> rawType, TypeVariable<?> unknown) {
     Class<?> declaredByRaw = declaringClassOf(unknown);
 
     // we can't reduce this further
@@ -320,7 +318,7 @@ public class MoreTypes {
     Type declaredBy = getGenericSupertype(type, rawType, declaredByRaw);
     if (declaredBy instanceof ParameterizedType) {
       int index = indexOf(declaredByRaw.getTypeParameters(), unknown);
-      return ((ParameterizedType) declaredBy).getActualTypeArguments()[index];
+      return getSharedTypeArguments((ParameterizedType) declaredBy)[index];
     }
 
     return unknown;
@@ -336,10 +334,21 @@ public class MoreTypes {
   }
 
   /**
+   * This method is used as a performance optimization to prevent unnecessary clones of
+   * typeArguments from being made by ParameterizedTypeImpl.
+   */
+  private static Type[] getSharedTypeArguments(ParameterizedType p) {
+    if (p instanceof ParameterizedTypeImpl) {
+      return ((ParameterizedTypeImpl) p).typeArguments;
+    }
+    return p.getActualTypeArguments();
+  }
+
+  /**
    * Returns the declaring class of {@code typeVariable}, or {@code null} if it was not declared by
    * a class.
    */
-  private static Class<?> declaringClassOf(TypeVariable typeVariable) {
+  private static Class<?> declaringClassOf(TypeVariable<?> typeVariable) {
     GenericDeclaration genericDeclaration = typeVariable.getGenericDeclaration();
     return genericDeclaration instanceof Class ? (Class<?>) genericDeclaration : null;
   }
@@ -348,7 +357,7 @@ public class MoreTypes {
       implements ParameterizedType, Serializable, CompositeType {
     private final Type ownerType;
     private final Type rawType;
-    private final Type[] typeArguments;
+    final Type[] typeArguments;
 
     public ParameterizedTypeImpl(Type ownerType, Type rawType, Type... typeArguments) {
       // require an owner type if the raw type needs it
@@ -356,11 +365,32 @@ public class MoreTypes {
 
       this.ownerType = ownerType == null ? null : canonicalize(ownerType);
       this.rawType = canonicalize(rawType);
-      this.typeArguments = typeArguments.clone();
-      for (int t = 0; t < this.typeArguments.length; t++) {
-        checkNotNull(this.typeArguments[t], "type parameter");
-        checkNotPrimitive(this.typeArguments[t], "type parameters");
-        this.typeArguments[t] = canonicalize(this.typeArguments[t]);
+      int providedArgumentLength = typeArguments.length;
+      Type[] clonedTypeArguments = typeArguments.clone();
+      int validArgLength = providedArgumentLength;
+      if (this.rawType instanceof Class) {
+        Class<?> klass = (Class) this.rawType;
+        int classArgumentLength = klass.getTypeParameters().length;
+        // TODO(b/163147654): change following if condition from < to =
+        if (providedArgumentLength < classArgumentLength) {
+          throw new IllegalArgumentException(
+              "Length of provided type arguments is less than length of required parameters for"
+                  + " class:"
+                  + klass.getName()
+                  + " provided type argument length:"
+                  + providedArgumentLength
+                  + " length of class parameters:"
+                  + classArgumentLength);
+        } else if (providedArgumentLength > classArgumentLength) {
+          validArgLength = classArgumentLength;
+        }
+      }
+
+      this.typeArguments = new Type[validArgLength];
+      for (int t = 0; t < validArgLength; t++) {
+        checkNotNull(clonedTypeArguments[t], "type parameter");
+        checkNotPrimitive(clonedTypeArguments[t], "type parameters");
+        this.typeArguments[t] = canonicalize(clonedTypeArguments[t]);
       }
     }
 
@@ -418,16 +448,16 @@ public class MoreTypes {
         return stringBuilder.toString();
       }
 
-      stringBuilder.append("<").append(typeToString(typeArguments[0]));
+      stringBuilder.append('<').append(typeToString(typeArguments[0]));
       for (int i = 1; i < typeArguments.length; i++) {
         stringBuilder.append(", ").append(typeToString(typeArguments[i]));
       }
-      return stringBuilder.append(">").toString();
+      return stringBuilder.append('>').toString();
     }
 
     private static void ensureOwnerType(Type ownerType, Type rawType) {
       if (rawType instanceof Class<?>) {
-        Class rawTypeAsClass = (Class) rawType;
+        Class<?> rawTypeAsClass = (Class<?>) rawType;
         checkArgument(
             ownerType != null || rawTypeAsClass.getEnclosingClass() == null,
             "No owner type for enclosed %s",

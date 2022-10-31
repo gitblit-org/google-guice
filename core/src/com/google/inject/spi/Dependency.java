@@ -101,7 +101,7 @@ public final class Dependency<T> {
   @Override
   public boolean equals(Object o) {
     if (o instanceof Dependency) {
-      Dependency dependency = (Dependency) o;
+      Dependency<?> dependency = (Dependency<?>) o;
       return Objects.equal(injectionPoint, dependency.injectionPoint)
           && parameterIndex == dependency.parameterIndex
           && key.equals(dependency.key);
@@ -115,9 +115,9 @@ public final class Dependency<T> {
     StringBuilder builder = new StringBuilder();
     builder.append(key);
     if (injectionPoint != null) {
-      builder.append("@").append(injectionPoint);
+      builder.append('@').append(injectionPoint);
       if (parameterIndex != -1) {
-        builder.append("[").append(parameterIndex).append("]");
+        builder.append('[').append(parameterIndex).append(']');
       }
     }
     return builder.toString();

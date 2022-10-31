@@ -47,16 +47,17 @@ final class WeakKeySet {
   private final Object lock;
 
   /**
-   * Tracks child injector lifetimes and evicts blacklisted keys/sources after the child injector is
+   * Tracks child injector lifetimes and evicts banned keys/sources after the child injector is
    * garbage collected.
    */
-  private final Cache<State, Set<KeyAndSource>> evictionCache =
+  private final Cache<InjectorBindingData, Set<KeyAndSource>> evictionCache =
       CacheBuilder.newBuilder().weakKeys().removalListener(this::cleanupOnRemoval).build();
 
-  private void cleanupOnRemoval(RemovalNotification<State, Set<KeyAndSource>> notification) {
+  private void cleanupOnRemoval(
+      RemovalNotification<InjectorBindingData, Set<KeyAndSource>> notification) {
     Preconditions.checkState(RemovalCause.COLLECTED.equals(notification.getCause()));
 
-    // There may be multiple child injectors blacklisting a certain key so only remove the source
+    // There may be multiple child injectors banning a certain key so only remove the source
     // that's relevant.
     synchronized (lock) {
       for (KeyAndSource keyAndSource : notification.getValue()) {
@@ -75,7 +76,7 @@ final class WeakKeySet {
     this.lock = lock;
   }
 
-  public void add(Key<?> key, State state, Object source) {
+  public void add(Key<?> key, InjectorBindingData state, Object source) {
     if (backingMap == null) {
       backingMap = Maps.newHashMap();
     }
@@ -88,7 +89,7 @@ final class WeakKeySet {
     backingMap.computeIfAbsent(key, k -> LinkedHashMultiset.create()).add(convertedSource);
 
     // Avoid all the extra work if we can.
-    if (state.parent() != State.NONE) {
+    if (state.parent().isPresent()) {
       Set<KeyAndSource> keyAndSources = evictionCache.getIfPresent(state);
       if (keyAndSources == null) {
         evictionCache.put(state, keyAndSources = Sets.newHashSet());

@@ -109,7 +109,7 @@ class FilterDefinition implements ProviderWithExtensionVisitor<FilterDefinition>
       return;
     }
 
-    //initialize our filter with the configured context params and servlet context
+    // initialize our filter with the configured context params and servlet context
     filter.init(
         new FilterConfig() {
           @Override
@@ -128,7 +128,7 @@ class FilterDefinition implements ProviderWithExtensionVisitor<FilterDefinition>
           }
 
           @Override
-          public Enumeration getInitParameterNames() {
+          public Enumeration<String> getInitParameterNames() {
             return Iterators.asEnumeration(initParams.keySet().iterator());
           }
         });

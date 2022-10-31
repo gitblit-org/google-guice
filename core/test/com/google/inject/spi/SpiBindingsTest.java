@@ -18,7 +18,6 @@ package com.google.inject.spi;
 
 import static com.google.inject.Asserts.assertContains;
 import static com.google.inject.Asserts.getDeclaringSourcePart;
-import static com.google.inject.Asserts.isIncludeStackTraceComplete;
 import static java.util.Comparator.comparing;
 
 import com.google.common.collect.ImmutableSet;
@@ -393,6 +392,7 @@ public class SpiBindingsTest extends TestCase {
                 bind(String.class)
                     .toProvider(
                         new ProviderWithExtensionVisitor<String>() {
+                          @SuppressWarnings("unchecked") // Safe because V is fixed to String
                           @Override
                           public <B, V> V acceptExtensionVisitor(
                               BindingTargetVisitor<B, V> visitor,
@@ -451,15 +451,10 @@ public class SpiBindingsTest extends TestCase {
     }
   }
 
-  public void checkBindingSource(Binding binding) {
+  public void checkBindingSource(Binding<?> binding) {
     assertContains(binding.getSource().toString(), getDeclaringSourcePart(getClass()));
     ElementSource source = (ElementSource) binding.getSource();
     assertFalse(source.getModuleClassNames().isEmpty());
-    if (isIncludeStackTraceComplete()) {
-      assertTrue(source.getStackTrace().length > 0);
-    } else {
-      assertEquals(0, source.getStackTrace().length);
-    }
   }
 
   public void checkInjector(Module module, ElementVisitor<?>... visitors) {
